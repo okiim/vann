@@ -1,0 +1,496 @@
+-- =============================================
+-- Library Management System Database
+-- =============================================
+
+-- Drop database if exists and create new one
+DROP DATABASE IF EXISTS library_management_system;
+CREATE DATABASE library_management_system;
+USE library_management_system;
+
+-- =============================================
+-- CATEGORIES TABLE
+-- =============================================
+CREATE TABLE categories (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL UNIQUE,
+    description TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    INDEX idx_category_name (name)
+);
+
+-- =============================================
+-- BOOKS TABLE
+-- =============================================
+CREATE TABLE books (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    title VARCHAR(500) NOT NULL,
+    author VARCHAR(255),
+    isbn VARCHAR(50) UNIQUE,
+    publisher VARCHAR(255),
+    publication_year YEAR,
+    quantity INT NOT NULL DEFAULT 1,
+    available INT NOT NULL DEFAULT 1,
+    category_id INT,
+    location VARCHAR(100), -- Shelf location
+    description TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (category_id) REFERENCES categories(id) ON DELETE SET NULL,
+    INDEX idx_book_title (title),
+    INDEX idx_book_author (author),
+    INDEX idx_book_isbn (isbn),
+    INDEX idx_book_category (category_id),
+    
+    CONSTRAINT chk_quantity_positive CHECK (quantity >= 0),
+    CONSTRAINT chk_available_valid CHECK (available >= 0 AND available <= quantity)
+);
+
+-- =============================================
+-- MEMBERS TABLE
+-- =============================================
+CREATE TABLE members (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    member_id VARCHAR(50) UNIQUE NOT NULL, -- Library card number
+    name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    phone VARCHAR(50),
+    address TEXT,
+    member_type ENUM('Student', 'Faculty', 'Staff', 'Public') NOT NULL DEFAULT 'Student',
+    status ENUM('Active', 'Inactive', 'Suspended') NOT NULL DEFAULT 'Active',
+    registration_date DATE DEFAULT (CURRENT_DATE),
+    expiry_date DATE,
+    max_books INT DEFAULT 5, -- Maximum books they can borrow
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    INDEX idx_member_id (member_id),
+    INDEX idx_member_name (name),
+    INDEX idx_member_email (email),
+    INDEX idx_member_type (member_type),
+    INDEX idx_member_status (status)
+);
+
+-- =============================================
+-- BORROWINGS TABLE
+-- =============================================
+CREATE TABLE borrowings (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    book_id INT NOT NULL,
+    member_id INT NOT NULL,
+    borrow_date DATE NOT NULL DEFAULT (CURRENT_DATE),
+    due_date DATE NOT NULL,
+    return_date DATE NULL,
+    status ENUM('Borrowed', 'Returned', 'Overdue', 'Lost') NOT NULL DEFAULT 'Borrowed',
+    fine_amount DECIMAL(10,2) DEFAULT 0.00,
+    notes TEXT,
+    issued_by VARCHAR(100), -- Staff member who issued the book
+    returned_to VARCHAR(100), -- Staff member who received the book
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE,
+    FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE,
+    INDEX idx_borrowing_book (book_id),
+    INDEX idx_borrowing_member (member_id),
+    INDEX idx_borrowing_status (status),
+    INDEX idx_borrowing_dates (borrow_date, due_date),
+    
+    CONSTRAINT chk_dates_valid CHECK (due_date >= borrow_date),
+    CONSTRAINT chk_return_date_valid CHECK (return_date IS NULL OR return_date >= borrow_date)
+);
+
+-- =============================================
+-- RESERVATIONS TABLE (For future bookings)
+-- =============================================
+CREATE TABLE reservations (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    book_id INT NOT NULL,
+    member_id INT NOT NULL,
+    reservation_date DATE NOT NULL DEFAULT (CURRENT_DATE),
+    expiry_date DATE NOT NULL,
+    status ENUM('Active', 'Fulfilled', 'Cancelled', 'Expired') NOT NULL DEFAULT 'Active',
+    priority INT DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (book_id) REFERENCES books(id) ON DELETE CASCADE,
+    FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE,
+    INDEX idx_reservation_book (book_id),
+    INDEX idx_reservation_member (member_id),
+    INDEX idx_reservation_status (status),
+    
+    UNIQUE KEY unique_active_reservation (book_id, member_id, status)
+);
+
+-- =============================================
+-- FINES TABLE
+-- =============================================
+CREATE TABLE fines (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    member_id INT NOT NULL,
+    borrowing_id INT,
+    fine_type ENUM('Overdue', 'Lost', 'Damage') NOT NULL,
+    amount DECIMAL(10,2) NOT NULL,
+    paid_amount DECIMAL(10,2) DEFAULT 0.00,
+    status ENUM('Pending', 'Paid', 'Waived') NOT NULL DEFAULT 'Pending',
+    issued_date DATE NOT NULL DEFAULT (CURRENT_DATE),
+    paid_date DATE,
+    description TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    
+    FOREIGN KEY (member_id) REFERENCES members(id) ON DELETE CASCADE,
+    FOREIGN KEY (borrowing_id) REFERENCES borrowings(id) ON DELETE SET NULL,
+    INDEX idx_fine_member (member_id),
+    INDEX idx_fine_status (status),
+    INDEX idx_fine_type (fine_type),
+    
+    CONSTRAINT chk_fine_amount_positive CHECK (amount >= 0),
+    CONSTRAINT chk_paid_amount_valid CHECK (paid_amount >= 0 AND paid_amount <= amount)
+);
+
+-- =============================================
+-- LIBRARY SETTINGS TABLE
+-- =============================================
+CREATE TABLE library_settings (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    setting_key VARCHAR(100) NOT NULL UNIQUE,
+    setting_value TEXT NOT NULL,
+    description TEXT,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- =============================================
+-- AUDIT LOG TABLE
+-- =============================================
+CREATE TABLE audit_log (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    table_name VARCHAR(50) NOT NULL,
+    record_id INT NOT NULL,
+    action ENUM('INSERT', 'UPDATE', 'DELETE') NOT NULL,
+    old_values JSON,
+    new_values JSON,
+    user_id VARCHAR(100),
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    
+    INDEX idx_audit_table (table_name),
+    INDEX idx_audit_record (record_id),
+    INDEX idx_audit_timestamp (timestamp)
+);
+
+-- =============================================
+-- INSERT SAMPLE DATA
+-- =============================================
+
+-- Insert Categories
+INSERT INTO categories (name, description) VALUES
+('Fiction', 'Novels, short stories, and other fictional works'),
+('Non-Fiction', 'Factual books, biographies, and reference materials'),
+('Science & Technology', 'Books on scientific research, technology, and innovation'),
+('History', 'Historical accounts, documentaries, and historical analysis'),
+('Biography', 'Life stories and memoirs of notable individuals'),
+('Education', 'Textbooks, academic materials, and educational resources'),
+('Children', 'Books specifically written for children and young readers'),
+('Reference', 'Dictionaries, encyclopedias, and reference materials'),
+('Philosophy', 'Philosophical works and thought-provoking literature'),
+('Health & Medicine', 'Medical books, health guides, and wellness materials');
+
+-- Insert Library Settings
+INSERT INTO library_settings (setting_key, setting_value, description) VALUES
+('max_borrow_days_student', '14', 'Maximum borrowing days for students'),
+('max_borrow_days_faculty', '30', 'Maximum borrowing days for faculty'),
+('max_borrow_days_staff', '21', 'Maximum borrowing days for staff'),
+('max_borrow_days_public', '7', 'Maximum borrowing days for public members'),
+('fine_per_day', '1.00', 'Fine amount per day for overdue books'),
+('max_books_student', '5', 'Maximum books a student can borrow'),
+('max_books_faculty', '10', 'Maximum books a faculty can borrow'),
+('max_books_staff', '7', 'Maximum books a staff can borrow'),
+('max_books_public', '3', 'Maximum books a public member can borrow'),
+('reservation_expiry_days', '3', 'Days after which a reservation expires');
+
+-- Insert Sample Books
+INSERT INTO books (title, author, isbn, publisher, publication_year, quantity, available, category_id, location, description) VALUES
+('To Kill a Mockingbird', 'Harper Lee', '978-0-06-112008-4', 'HarperCollins', 1960, 5, 5, 1, 'A-001', 'A classic American novel about racial injustice in the Deep South'),
+('1984', 'George Orwell', '978-0-452-28423-4', 'Plume', 1949, 3, 2, 1, 'A-002', 'Dystopian social science fiction novel'),
+('The Great Gatsby', 'F. Scott Fitzgerald', '978-0-7432-7356-5', 'Scribner', 1925, 4, 4, 1, 'A-003', 'American classic set in the Jazz Age'),
+('A Brief History of Time', 'Stephen Hawking', '978-0-553-38016-3', 'Bantam', 1988, 2, 1, 3, 'S-001', 'Popular science book on cosmology'),
+('The Art of War', 'Sun Tzu', '978-1-59030-963-7', 'Barnes & Noble', 2003, 3, 3, 2, 'H-001', 'Ancient Chinese military treatise'),
+('Steve Jobs', 'Walter Isaacson', '978-1-4516-4853-9', 'Simon & Schuster', 2011, 2, 2, 5, 'B-001', 'Biography of Apple co-founder Steve Jobs'),
+('Introduction to Algorithms', 'Thomas H. Cormen', '978-0-262-53305-8', 'MIT Press', 2009, 6, 5, 6, 'CS-001', 'Comprehensive textbook on algorithms'),
+('Harry Potter and the Philosopher\'s Stone', 'J.K. Rowling', '978-0-7475-3269-9', 'Bloomsbury', 1997, 8, 6, 7, 'C-001', 'First book in the Harry Potter series'),
+('The Republic', 'Plato', '978-0-14-044914-5', 'Penguin Classics', 2007, 2, 2, 9, 'P-001', 'Philosophical work on justice and politics'),
+('Gray\'s Anatomy', 'Henry Gray', '978-0-443-06684-9', 'Churchill Livingstone', 2008, 1, 1, 10, 'M-001', 'Comprehensive anatomy reference');
+
+-- Insert Sample Members
+INSERT INTO members (member_id, name, email, phone, address, member_type, max_books, expiry_date) VALUES
+('STU001', 'Alice Johnson', 'alice.johnson@university.edu', '555-0101', '123 Campus Drive, University City', 'Student', 5, '2024-12-31'),
+('STU002', 'Bob Smith', 'bob.smith@university.edu', '555-0102', '456 Student Lane, University City', 'Student', 5, '2024-12-31'),
+('FAC001', 'Dr. Carol Wilson', 'carol.wilson@university.edu', '555-0201', '789 Faculty Row, University City', 'Faculty', 10, '2025-06-30'),
+('STF001', 'David Brown', 'david.brown@university.edu', '555-0301', '321 Staff Street, University City', 'Staff', 7, '2025-03-31'),
+('PUB001', 'Emma Davis', 'emma.davis@email.com', '555-0401', '654 Public Avenue, City Center', 'Public', 3, '2024-09-30'),
+('STU003', 'Frank Miller', 'frank.miller@university.edu', '555-0103', '987 Dorm Building, University City', 'Student', 5, '2024-12-31'),
+('FAC002', 'Dr. Grace Lee', 'grace.lee@university.edu', '555-0202', '147 Research Park, University City', 'Faculty', 10, '2025-06-30'),
+('STF002', 'Henry Taylor', 'henry.taylor@university.edu', '555-0302', '258 Administration Building, University City', 'Staff', 7, '2025-03-31');
+
+-- Insert Sample Borrowings
+INSERT INTO borrowings (book_id, member_id, borrow_date, due_date, status, issued_by) VALUES
+(2, 1, '2024-01-15', '2024-01-29', 'Borrowed', 'Librarian A'),
+(4, 3, '2024-01-10', '2024-02-10', 'Borrowed', 'Librarian B'),
+(7, 1, '2024-01-20', '2024-02-03', 'Borrowed', 'Librarian A'),
+(8, 6, '2024-01-12', '2024-01-26', 'Returned', 'Librarian A'),
+(1, 2, '2024-01-18', '2024-02-01', 'Borrowed', 'Librarian B'),
+(8, 5, '2024-01-22', '2024-01-29', 'Overdue', 'Librarian A');
+
+-- Update return date for returned book
+UPDATE borrowings SET return_date = '2024-01-25', returned_to = 'Librarian B' WHERE id = 4;
+
+-- Insert Sample Reservations
+INSERT INTO reservations (book_id, member_id, reservation_date, expiry_date, status) VALUES
+(2, 5, '2024-01-25', '2024-01-28', 'Active'),
+(4, 2, '2024-01-20', '2024-01-23', 'Expired');
+
+-- Insert Sample Fines
+INSERT INTO fines (member_id, borrowing_id, fine_type, amount, status, description) VALUES
+(5, 6, 'Overdue', 5.00, 'Pending', 'Book overdue by 5 days');
+
+-- =============================================
+-- USEFUL VIEWS
+-- =============================================
+
+-- View: Current Borrowings with Details
+CREATE VIEW current_borrowings AS
+SELECT 
+    b.id,
+    bk.title AS book_title,
+    bk.author AS book_author,
+    m.name AS member_name,
+    m.member_id,
+    m.member_type,
+    b.borrow_date,
+    b.due_date,
+    b.status,
+    DATEDIFF(CURDATE(), b.due_date) AS days_overdue,
+    b.fine_amount
+FROM borrowings b
+JOIN books bk ON b.book_id = bk.id
+JOIN members m ON b.member_id = m.id
+WHERE b.status IN ('Borrowed', 'Overdue');
+
+-- View: Book Availability
+CREATE VIEW book_availability AS
+SELECT 
+    b.id,
+    b.title,
+    b.author,
+    c.name AS category,
+    b.quantity,
+    b.available,
+    (b.quantity - b.available) AS borrowed_count,
+    CASE 
+        WHEN b.available > 0 THEN 'Available'
+        ELSE 'Not Available'
+    END AS availability_status
+FROM books b
+LEFT JOIN categories c ON b.category_id = c.id;
+
+-- View: Member Statistics
+CREATE VIEW member_statistics AS
+SELECT 
+    m.id,
+    m.member_id,
+    m.name,
+    m.member_type,
+    COUNT(b.id) AS total_borrowings,
+    COUNT(CASE WHEN b.status = 'Borrowed' THEN 1 END) AS current_borrowings,
+    COUNT(CASE WHEN b.status = 'Overdue' THEN 1 END) AS overdue_books,
+    COALESCE(SUM(f.amount - f.paid_amount), 0) AS outstanding_fines
+FROM members m
+LEFT JOIN borrowings b ON m.id = b.member_id
+LEFT JOIN fines f ON m.id = f.member_id AND f.status = 'Pending'
+GROUP BY m.id, m.member_id, m.name, m.member_type;
+
+-- =============================================
+-- STORED PROCEDURES
+-- =============================================
+
+DELIMITER //
+
+-- Procedure to borrow a book
+CREATE PROCEDURE BorrowBook(
+    IN p_book_id INT,
+    IN p_member_id INT,
+    IN p_issued_by VARCHAR(100)
+)
+BEGIN
+    DECLARE v_available INT;
+    DECLARE v_max_books INT;
+    DECLARE v_current_books INT;
+    DECLARE v_member_type VARCHAR(20);
+    DECLARE v_borrow_days INT;
+    DECLARE v_due_date DATE;
+    
+    -- Check if book is available
+    SELECT available INTO v_available FROM books WHERE id = p_book_id;
+    
+    IF v_available <= 0 THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Book is not available';
+    END IF;
+    
+    -- Check member borrowing limits
+    SELECT member_type, max_books INTO v_member_type, v_max_books 
+    FROM members WHERE id = p_member_id;
+    
+    SELECT COUNT(*) INTO v_current_books 
+    FROM borrowings 
+    WHERE member_id = p_member_id AND status = 'Borrowed';
+    
+    IF v_current_books >= v_max_books THEN
+        SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Member has reached borrowing limit';
+    END IF;
+    
+    -- Get borrowing period based on member type
+    CASE v_member_type
+        WHEN 'Student' THEN SET v_borrow_days = 14;
+        WHEN 'Faculty' THEN SET v_borrow_days = 30;
+        WHEN 'Staff' THEN SET v_borrow_days = 21;
+        WHEN 'Public' THEN SET v_borrow_days = 7;
+        ELSE SET v_borrow_days = 14;
+    END CASE;
+    
+    SET v_due_date = DATE_ADD(CURDATE(), INTERVAL v_borrow_days DAY);
+    
+    -- Insert borrowing record
+    INSERT INTO borrowings (book_id, member_id, borrow_date, due_date, status, issued_by)
+    VALUES (p_book_id, p_member_id, CURDATE(), v_due_date, 'Borrowed', p_issued_by);
+    
+    -- Update book availability
+    UPDATE books SET available = available - 1 WHERE id = p_book_id;
+    
+END //
+
+-- Procedure to return a book
+CREATE PROCEDURE ReturnBook(
+    IN p_borrowing_id INT,
+    IN p_returned_to VARCHAR(100)
+)
+BEGIN
+    DECLARE v_book_id INT;
+    DECLARE v_due_date DATE;
+    DECLARE v_member_id INT;
+    DECLARE v_days_overdue INT;
+    DECLARE v_fine_amount DECIMAL(10,2);
+    
+    -- Get borrowing details
+    SELECT book_id, due_date, member_id 
+    INTO v_book_id, v_due_date, v_member_id
+    FROM borrowings 
+    WHERE id = p_borrowing_id AND status IN ('Borrowed', 'Overdue');
+    
+    -- Calculate fine if overdue
+    SET v_days_overdue = GREATEST(0, DATEDIFF(CURDATE(), v_due_date));
+    SET v_fine_amount = v_days_overdue * 1.00; -- $1 per day
+    
+    -- Update borrowing record
+    UPDATE borrowings 
+    SET return_date = CURDATE(), 
+        status = 'Returned',
+        returned_to = p_returned_to,
+        fine_amount = v_fine_amount
+    WHERE id = p_borrowing_id;
+    
+    -- Update book availability
+    UPDATE books SET available = available + 1 WHERE id = v_book_id;
+    
+    -- Insert fine record if applicable
+    IF v_fine_amount > 0 THEN
+        INSERT INTO fines (member_id, borrowing_id, fine_type, amount, description)
+        VALUES (v_member_id, p_borrowing_id, 'Overdue', v_fine_amount, 
+                CONCAT('Book returned ', v_days_overdue, ' days late'));
+    END IF;
+    
+END //
+
+DELIMITER ;
+
+-- =============================================
+-- TRIGGERS
+-- =============================================
+
+DELIMITER //
+
+-- Trigger to update book status when borrowing status changes
+CREATE TRIGGER update_overdue_status
+BEFORE UPDATE ON borrowings
+FOR EACH ROW
+BEGIN
+    IF NEW.status = 'Borrowed' AND NEW.due_date < CURDATE() THEN
+        SET NEW.status = 'Overdue';
+    END IF;
+END //
+
+-- Trigger to log changes in audit table
+CREATE TRIGGER books_audit_insert
+AFTER INSERT ON books
+FOR EACH ROW
+BEGIN
+    INSERT INTO audit_log (table_name, record_id, action, new_values)
+    VALUES ('books', NEW.id, 'INSERT', JSON_OBJECT(
+        'title', NEW.title,
+        'author', NEW.author,
+        'isbn', NEW.isbn,
+        'quantity', NEW.quantity
+    ));
+END //
+
+CREATE TRIGGER books_audit_update
+AFTER UPDATE ON books
+FOR EACH ROW
+BEGIN
+    INSERT INTO audit_log (table_name, record_id, action, old_values, new_values)
+    VALUES ('books', NEW.id, 'UPDATE', 
+        JSON_OBJECT('title', OLD.title, 'author', OLD.author, 'quantity', OLD.quantity),
+        JSON_OBJECT('title', NEW.title, 'author', NEW.author, 'quantity', NEW.quantity)
+    );
+END //
+
+DELIMITER ;
+
+-- =============================================
+-- INDEXES FOR PERFORMANCE
+-- =============================================
+
+-- Additional indexes for better query performance
+CREATE INDEX idx_borrowings_overdue ON borrowings (due_date, status);
+CREATE INDEX idx_members_active ON members (status, member_type);
+CREATE INDEX idx_books_available ON books (available, category_id);
+
+-- =============================================
+-- SAMPLE QUERIES
+-- =============================================
+
+-- Example queries you can run:
+
+-- 1. Find all overdue books
+-- SELECT * FROM current_borrowings WHERE status = 'Overdue';
+
+-- 2. Find most popular books
+-- SELECT b.title, b.author, COUNT(br.id) as borrow_count 
+-- FROM books b 
+-- JOIN borrowings br ON b.id = br.book_id 
+-- GROUP BY b.id 
+-- ORDER BY borrow_count DESC;
+
+-- 3. Find members with outstanding fines
+-- SELECT * FROM member_statistics WHERE outstanding_fines > 0;
+
+-- 4. Check book availability
+-- SELECT * FROM book_availability WHERE availability_status = 'Available';
+
+-- =============================================
+-- DATABASE CREATION COMPLETE
+-- =============================================
+
+SELECT 'Library Management System Database Created Successfully!' AS Status;
